@@ -125,3 +125,15 @@ export async function importScenarioApi(data: any): Promise<Scenario> {
   }
   return res.json();
 }
+
+export async function fetchIndiaGeoJson(): Promise<any> {
+  try {
+    const res = await fetch('/geo/india_states.geojson');
+    if (res.ok) return await res.json();
+  } catch (err) {
+    // fallback to backend API
+  }
+  const apiRes = await fetch(`${BASE_URL}/geo/states`);
+  if (!apiRes.ok) throw new Error('Failed to load India boundary GeoJSON');
+  return apiRes.json();
+}

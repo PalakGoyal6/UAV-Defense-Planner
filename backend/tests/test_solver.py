@@ -262,3 +262,64 @@ def test_pipeline_end_to_end_example():
     )
     sum_lambda = sum(plan.load.site_loads.values())
     assert abs(sum_lambda - covered_asset_threats) < 1e-4
+
+def test_india_point_in_polygon():
+    """Test 10: Point-in-polygon verification for Delhi, Mumbai, Bengaluru, and Arabian Sea."""
+    from app.solver.geometry import find_state_for_point
+    assert find_state_for_point(28.61, 77.21) == "Delhi"
+    assert find_state_for_point(19.08, 72.88) == "Maharashtra"
+    assert find_state_for_point(12.97, 77.59) == "Karnataka"
+    assert find_state_for_point(15.0, 65.0) == "Outside India"
+
+def test_synthetic_points_inside_states():
+    """Test 11: All generated synthetic points fall inside their chosen states."""
+    from app.solver.scaling import generate_synthetic_scenario
+    from app.models import SyntheticGenerateRequest
+    from app.solver.geometry import find_state_for_point
+
+    req = SyntheticGenerateRequest(
+        num_assets=15,
+        num_sites=15,
+        coordinate_mode="geo",
+        selected_states=["Punjab", "Rajasthan", "Karnataka"]
+    )
+    sc = generate_synthetic_scenario(req)
+    for asset in sc.assets:
+        detected = find_state_for_point(asset.lat, asset.lon)
+        assert detected == asset.region, f"Asset {asset.id} at ({asset.lat}, {asset.lon}) detected as {detected}, expected {asset.region}"
+    for site in sc.sites:
+        detected = find_state_for_point(site.lat, site.lon)
+        assert detected == site.region, f"Site {site.id} at ({site.lat}, {site.lon}) detected as {detected}, expected {site.region}"
+
+def test_results_by_region_sum_conservation():
+    """Test 12: The per-region totals in results_by_region add up to the overall totals."""
+    from app.solver.scaling import generate_synthetic_scenario
+    from app.models import SyntheticGenerateRequest
+
+    req = SyntheticGenerateRequest(
+        num_assets=20,
+        num_sites=15,
+        coordinate_mode="geo",
+        selected_states=["Punjab", "Rajasthan", "Maharashtra"]
+    )
+    scenario = generate_synthetic_scenario(req)
+    plan = run_defense_pipeline(scenario)
+
+    assert plan.results_by_region, "results_by_region should not be empty"
+
+    # Regional sum checks
+    sum_val_protected = sum(r.value_protected for r in plan.results_by_region.values())
+    sum_site_cost = sum(r.total_site_cost for r in plan.results_by_region.values())
+    sum_channels = sum(r.total_channels for r in plan.results_by_region.values())
+    sum_stock_Q = sum(r.allocated_stock_Q for r in plan.results_by_region.values())
+    sum_reserve_y1 = sum(r.reserve_y1 for r in plan.results_by_region.values())
+    sum_num_assets = sum(r.num_assets for r in plan.results_by_region.values())
+    sum_opened_sites = sum(r.num_opened_sites for r in plan.results_by_region.values())
+
+    assert abs(sum_val_protected - plan.location.total_value_protected) < 1e-4
+    assert abs(sum_site_cost - plan.location.total_site_cost) < 1e-4
+    assert sum_channels == plan.channels.total_channels
+    assert sum_stock_Q == plan.inventory.total_stock_Q_star
+    assert sum_reserve_y1 == plan.reserve.reserve_y1_star
+    assert sum_num_assets == len(scenario.assets)
+    assert sum_opened_sites == len(plan.location.opened_sites)

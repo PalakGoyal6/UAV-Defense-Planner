@@ -1,16 +1,107 @@
 import json
 import sys
 import time
-from typing import List
+from typing import Dict, List
 from app.models import (
-    Scenario, FullPlanResponse, WorkingStep
+    Scenario, FullPlanResponse, WorkingStep, RegionResult
 )
-from app.solver.geometry import compute_coverage_matrix
+from app.solver.geometry import compute_coverage_matrix, find_state_for_point, get_state_geometries
 from app.solver.location import solve_location_step
 from app.solver.load import compute_threat_load_step
 from app.solver.queueing import size_engagement_channels_step
 from app.solver.inventory import compute_inventory_step
 from app.solver.reserve import compute_reserve_step
+
+def compute_results_by_region(
+    scenario: Scenario,
+    location,
+    channels,
+    inventory,
+    reserve
+) -> Dict[str, RegionResult]:
+    """
+    Computes regional metrics breakdown.
+    Ensures per-region totals add up exactly to the overall totals.
+    """
+    results_by_region: Dict[str, RegionResult] = {}
+
+    # Initialize all Indian states if in geo mode
+    if scenario.coordinate_mode == "geo":
+        for st_name, _, _, _ in get_state_geometries():
+            results_by_region[st_name] = RegionResult(region_name=st_name)
+
+    # Helper to get effective region
+    def get_asset_region(a) -> str:
+        if a.region:
+            return a.region
+        if scenario.coordinate_mode == "geo":
+            return find_state_for_point(a.lat, a.lon)
+        return "Default"
+
+    def get_site_region(s) -> str:
+        if s.region:
+            return s.region
+        if scenario.coordinate_mode == "geo":
+            return find_state_for_point(s.lat, s.lon)
+        return "Default"
+
+    # Map assignments by asset_id
+    assignment_map = {assign.asset_id: assign for assign in location.assignments}
+
+    # Aggregate assets
+    for asset in scenario.assets:
+        r_name = get_asset_region(asset)
+        if r_name not in results_by_region:
+            results_by_region[r_name] = RegionResult(region_name=r_name)
+        reg = results_by_region[r_name]
+        reg.num_assets += 1
+        reg.total_asset_value += asset.value
+
+        assign = assignment_map.get(asset.id)
+        if assign and assign.covered:
+            reg.value_protected += asset.value
+            reg.covered_asset_ids.append(asset.id)
+        else:
+            reg.uncovered_asset_ids.append(asset.id)
+
+    # Aggregate sites
+    opened_set = set(location.opened_sites)
+    for site in scenario.sites:
+        r_name = get_site_region(site)
+        if r_name not in results_by_region:
+            results_by_region[r_name] = RegionResult(region_name=r_name)
+        reg = results_by_region[r_name]
+
+        if site.id in opened_set:
+            reg.opened_sites.append(site.id)
+            reg.num_opened_sites += 1
+            reg.total_site_cost += site.cost
+
+            ch_res = channels.site_channels.get(site.id)
+            if ch_res:
+                reg.total_channels += ch_res.channels_allocated
+                if ch_res.channels_allocated > 0:
+                    reg.worst_leak_probability = max(reg.worst_leak_probability, ch_res.leak_probability)
+
+            inv_res = inventory.site_inventory.get(site.id)
+            if inv_res:
+                reg.allocated_stock_Q += inv_res.allocated_stock_Q
+
+            site_res = reserve.site_reserves.get(site.id, 0)
+            reg.reserve_y1 += site_res
+
+    # Finalize percentage and rounding
+    for reg in results_by_region.values():
+        reg.total_asset_value = round(reg.total_asset_value, 2)
+        reg.value_protected = round(reg.value_protected, 2)
+        reg.total_site_cost = round(reg.total_site_cost, 2)
+        if reg.total_asset_value > 0:
+            reg.pct_value_protected = round((reg.value_protected / reg.total_asset_value) * 100.0, 2)
+        else:
+            reg.pct_value_protected = 0.0
+        reg.worst_leak_probability = round(reg.worst_leak_probability, 4)
+
+    return results_by_region
 
 def build_working_steps(
     scenario: Scenario,
@@ -147,6 +238,11 @@ def run_defense_pipeline(scenario: Scenario) -> FullPlanResponse:
     # 5. Littlewood reserve
     reserve_out = compute_reserve_step(scenario, location_out, channel_out, inventory_out)
 
+    # 6. Regional results breakdown
+    results_by_region = compute_results_by_region(
+        scenario, location_out, channel_out, inventory_out, reserve_out
+    )
+
     # Construct Show Working
     working_steps = build_working_steps(
         scenario, location_out, load_out, channel_out, inventory_out, reserve_out
@@ -173,6 +269,7 @@ def run_defense_pipeline(scenario: Scenario) -> FullPlanResponse:
         channels=channel_out,
         inventory=inventory_out,
         reserve=reserve_out,
+        results_by_region=results_by_region,
         comparison=comparisons,
         working=working_steps,
         warnings=warnings,

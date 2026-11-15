@@ -72,3 +72,17 @@ def test_synthetic_generate_endpoint():
         gen_data = res.json()
         assert len(gen_data["assets"]) == 8
         assert len(gen_data["sites"]) == 10
+
+def test_geo_states_endpoint():
+    with TestClient(app) as client:
+        res = client.get("/api/geo/states")
+        assert res.status_code == 200
+        data = res.json()
+        assert data.get("type") == "FeatureCollection"
+        features = data.get("features", [])
+        assert len(features) >= 36
+        state_names = [f["properties"].get("state_name") for f in features]
+        assert "Delhi" in state_names
+        assert "Maharashtra" in state_names
+        assert "Karnataka" in state_names
+        assert "Jammu and Kashmir" in state_names or "Ladakh" in state_names

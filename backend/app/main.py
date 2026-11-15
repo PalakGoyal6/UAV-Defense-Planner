@@ -14,7 +14,7 @@ from app.models import (
     SyntheticGenerateRequest
 )
 from app.solver.pipeline import run_defense_pipeline
-from app.solver.geometry import compute_coverage_matrix
+from app.solver.geometry import compute_coverage_matrix, get_india_geojson, find_state_for_point
 from app.solver.sensitivity import run_sensitivity_analysis
 from app.solver.scaling import generate_synthetic_scenario, solve_multi_region_scenario
 
@@ -107,6 +107,13 @@ def get_coverage_matrix_api(scenario: Scenario):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Coverage calculation error: {str(exc)}"
         )
+
+@router.get("/geo/states")
+def get_india_states():
+    """
+    Returns the bundled, simplified Survey of India compliant GeoJSON for all 36 States/UTs.
+    """
+    return get_india_geojson()
 
 @router.post("/generate", response_model=Scenario)
 def generate_synthetic(req: SyntheticGenerateRequest):
@@ -255,9 +262,17 @@ def export_scenario(scenario_id: str, session: Session = Depends(get_session)):
 def import_scenario(data: Dict[str, Any], session: Session = Depends(get_session)):
     """
     Validates and imports a scenario from uploaded JSON data.
+    Auto-assigns regions for geographic coordinates if not explicitly overridden.
     """
     try:
         scenario = Scenario(**data)
+        if scenario.coordinate_mode == "geo":
+            for a in scenario.assets:
+                if not a.is_region_overridden and (not a.region or a.region == "Outside India"):
+                    a.region = find_state_for_point(a.lat, a.lon)
+            for s in scenario.sites:
+                if not s.is_region_overridden and (not s.region or s.region == "Outside India"):
+                    s.region = find_state_for_point(s.lat, s.lon)
         sc_id = str(uuid.uuid4())
         scenario.id = sc_id
         rec = ScenarioRecord(

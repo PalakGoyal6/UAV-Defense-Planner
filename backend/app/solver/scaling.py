@@ -1,55 +1,102 @@
+import math
 import random
 import uuid
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+from shapely.geometry import Point
 from app.models import (
-    Asset, CandidateSite, GlobalParameters, Scenario,
+    Asset, CandidateSite, Depot, GlobalParameters, Scenario,
     SyntheticGenerateRequest, FullPlanResponse, Step1LocationOutput,
     Step2LoadOutput, Step3QueueingOutput, Step4InventoryOutput,
     Step5ReserveOutput, WorkingStep
 )
-from app.solver.pipeline import run_defense_pipeline
+from app.solver.pipeline import run_defense_pipeline, compute_results_by_region
+from app.solver.geometry import (
+    get_state_geometries, haversine_distance, compute_depot_distance
+)
 
 INDIAN_REGION_PRESETS = {
-    "punjab": {
-        "name": "Punjab Border Sector (Synthetic)",
-        "min_lat": 30.5, "max_lat": 32.2, "min_lon": 74.3, "max_lon": 75.9
-    },
-    "rajasthan": {
-        "name": "Rajasthan Desert Sector (Synthetic)",
-        "min_lat": 26.2, "max_lat": 28.5, "min_lon": 70.8, "max_lon": 73.2
-    },
-    "ladakh": {
-        "name": "Ladakh Mountain Sector (Synthetic)",
-        "min_lat": 33.8, "max_lat": 35.2, "min_lon": 77.2, "max_lon": 79.1
-    },
-    "gujarat": {
-        "name": "Gujarat Coastal Sector (Synthetic)",
-        "min_lat": 22.0, "max_lat": 24.1, "min_lon": 68.8, "max_lon": 71.0
-    }
+    "punjab": "Punjab",
+    "rajasthan": "Rajasthan",
+    "ladakh": "Ladakh",
+    "gujarat": "Gujarat",
+    "maharashtra": "Maharashtra",
+    "karnataka": "Karnataka",
+    "delhi": "Delhi"
 }
+
+def sample_point_in_polygon(geom, prepared, bounds) -> Tuple[float, float]:
+    """
+    Performs rejection sampling to find a random (lat, lon) strictly inside the polygon.
+    Bounds are (min_lon, min_lat, max_lon, max_lat).
+    """
+    min_lon, min_lat, max_lon, max_lat = bounds
+    for _ in range(500):
+        rand_lon = random.uniform(min_lon, max_lon)
+        rand_lat = random.uniform(min_lat, max_lat)
+        pt = Point(rand_lon, rand_lat)
+        if prepared.contains(pt) or geom.covers(pt):
+            return (round(rand_lat, 4), round(rand_lon, 4))
+    
+    # Fallback to representative point if rejection sampling reaches limit
+    rep = geom.representative_point()
+    return (round(rep.y, 4), round(rep.x, 4))
 
 def generate_synthetic_scenario(req: SyntheticGenerateRequest) -> Scenario:
     """
     Generates a synthetic scenario for scaling and benchmarking.
+    In geo mode, points are placed inside real Indian state polygons using rejection sampling.
+    Resupply depots are placed and site depot_distance_km is calculated.
     Labels all data clearly as non-sensitive synthetic placeholders.
     """
     coord_mode = req.coordinate_mode
     scenario_id = str(uuid.uuid4())[:8]
 
+    # Resolve active states in geo mode
+    active_states = []
+    depots: List[Depot] = []
+
     if coord_mode == "geo":
-        preset = INDIAN_REGION_PRESETS.get(req.preset_region or "punjab", INDIAN_REGION_PRESETS["punjab"])
-        min_lat = req.bbox.get("min_lat", preset["min_lat"]) if req.bbox else preset["min_lat"]
-        max_lat = req.bbox.get("max_lat", preset["max_lat"]) if req.bbox else preset["max_lat"]
-        min_lon = req.bbox.get("min_lon", preset["min_lon"]) if req.bbox else preset["min_lon"]
-        max_lon = req.bbox.get("max_lon", preset["max_lon"]) if req.bbox else preset["max_lon"]
-        name = f"Synthetic Defense - {preset['name']}"
+        all_state_geoms = get_state_geometries()
+        state_map = {name.lower(): (name, geom, prep_geom, bounds) for name, geom, prep_geom, bounds in all_state_geoms}
+        
+        if req.spread_all_states:
+            active_states = all_state_geoms
+        elif req.selected_states:
+            for s_name in req.selected_states:
+                match = state_map.get(s_name.lower().strip())
+                if match:
+                    active_states.append(match)
+        elif req.preset_region:
+            preset_target = INDIAN_REGION_PRESETS.get(req.preset_region.lower(), req.preset_region)
+            match = state_map.get(preset_target.lower())
+            if match:
+                active_states.append(match)
+        
+        if not active_states:
+            # Default to Punjab
+            punjab_match = state_map.get("punjab")
+            active_states = [punjab_match] if punjab_match else [all_state_geoms[0]]
+
+        state_names_str = ", ".join(s[0] for s in active_states[:3]) + ("..." if len(active_states) > 3 else "")
+        name = f"Synthetic Defense - {state_names_str} ({req.num_assets} Assets, {req.num_sites} Sites)"
+
+        # Place 1-2 Depots
+        primary_st = active_states[0]
+        d1_lat, d1_lon = sample_point_in_polygon(primary_st[1], primary_st[2], primary_st[3])
+        depots.append(Depot(id="D1", name=f"{primary_st[0]} Resupply Depot", lat=d1_lat, lon=d1_lon))
+        if len(active_states) > 1:
+            sec_st = active_states[-1]
+            d2_lat, d2_lon = sample_point_in_polygon(sec_st[1], sec_st[2], sec_st[3])
+            depots.append(Depot(id="D2", name=f"{sec_st[0]} Logistics Hub", lat=d2_lat, lon=d2_lon))
+
     else:
         min_x = req.bbox.get("min_x", 0.0) if req.bbox else 0.0
         max_x = req.bbox.get("max_x", 50.0) if req.bbox else 50.0
         min_y = req.bbox.get("min_y", 0.0) if req.bbox else 0.0
         max_y = req.bbox.get("max_y", 50.0) if req.bbox else 50.0
         name = f"Synthetic Grid Sector ({req.num_assets} assets, {req.num_sites} sites)"
+        depots.append(Depot(id="D1", name="Central Logistics Depot", x=round((min_x + max_x) / 2.0, 1), y=round((min_y + max_y) / 2.0, 1)))
 
     # Asset generation
     assets: List[Asset] = []
@@ -60,8 +107,8 @@ def generate_synthetic_scenario(req: SyntheticGenerateRequest) -> Scenario:
         a_name = f"{random.choice(asset_types)} #{i}"
 
         if coord_mode == "geo":
-            lat = round(random.uniform(min_lat, max_lat), 4)
-            lon = round(random.uniform(min_lon, max_lon), 4)
+            st_name, geom, prep_geom, bounds = random.choice(active_states)
+            lat, lon = sample_point_in_polygon(geom, prep_geom, bounds)
             assets.append(
                 Asset(
                     id=f"A{i}",
@@ -70,7 +117,7 @@ def generate_synthetic_scenario(req: SyntheticGenerateRequest) -> Scenario:
                     lon=lon,
                     value=a_val,
                     threat_rate=a_lam,
-                    region=req.preset_region
+                    region=st_name
                 )
             )
         else:
@@ -84,7 +131,7 @@ def generate_synthetic_scenario(req: SyntheticGenerateRequest) -> Scenario:
                     y=y,
                     value=a_val,
                     threat_rate=a_lam,
-                    region=req.preset_region
+                    region=req.preset_region or "Default"
                 )
             )
 
@@ -95,8 +142,10 @@ def generate_synthetic_scenario(req: SyntheticGenerateRequest) -> Scenario:
         r_km = round(random.uniform(req.range_min, req.range_max), 1)
 
         if coord_mode == "geo":
-            lat = round(random.uniform(min_lat, max_lat), 4)
-            lon = round(random.uniform(min_lon, max_lon), 4)
+            st_name, geom, prep_geom, bounds = random.choice(active_states)
+            lat, lon = sample_point_in_polygon(geom, prep_geom, bounds)
+            # Compute depot distance to nearest depot
+            min_depot_dist = min(haversine_distance(lat, lon, d.lat, d.lon) for d in depots)
             sites.append(
                 CandidateSite(
                     id=f"S{j}",
@@ -107,12 +156,14 @@ def generate_synthetic_scenario(req: SyntheticGenerateRequest) -> Scenario:
                     range_km=r_km,
                     max_channels=12,
                     channel_cost=0.0,
-                    region=req.preset_region
+                    depot_distance_km=round(min_depot_dist, 2),
+                    region=st_name
                 )
             )
         else:
             x = round(random.uniform(min_x, max_x), 2)
             y = round(random.uniform(min_y, max_y), 2)
+            grid_depot_dist = min(math.hypot(x - d.x, y - d.y) * 10.0 for d in depots)
             sites.append(
                 CandidateSite(
                     id=f"S{j}",
@@ -123,7 +174,8 @@ def generate_synthetic_scenario(req: SyntheticGenerateRequest) -> Scenario:
                     range_km=r_km,
                     max_channels=12,
                     channel_cost=0.0,
-                    region=req.preset_region
+                    depot_distance_km=round(grid_depot_dist, 2),
+                    region=req.preset_region or "Default"
                 )
             )
 
@@ -150,6 +202,7 @@ def generate_synthetic_scenario(req: SyntheticGenerateRequest) -> Scenario:
         coordinate_mode=coord_mode,
         assets=assets,
         sites=sites,
+        depots=depots,
         parameters=params
     )
 
@@ -333,6 +386,10 @@ def solve_multi_region_scenario(
         )
     ]
 
+    results_by_region = compute_results_by_region(
+        scenario, merged_location, merged_channels, merged_inventory, merged_reserve
+    )
+
     return FullPlanResponse(
         scenario_id=scenario.id,
         scenario_name=f"{scenario.name} (Multi-Region Merged)",
@@ -341,6 +398,7 @@ def solve_multi_region_scenario(
         channels=merged_channels,
         inventory=merged_inventory,
         reserve=merged_reserve,
+        results_by_region=results_by_region,
         comparison=[],
         working=working,
         warnings=all_warnings,

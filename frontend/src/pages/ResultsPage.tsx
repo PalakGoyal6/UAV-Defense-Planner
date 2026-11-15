@@ -12,13 +12,17 @@ interface ResultsPageProps {
   plan: FullPlanResponse | null;
   onRunPlan: () => void;
   isRunning: boolean;
+  selectedRegionFilter?: string | null;
+  onClearRegionFilter?: () => void;
 }
 
 export const ResultsPage: React.FC<ResultsPageProps> = ({
   scenario,
   plan,
   onRunPlan,
-  isRunning
+  isRunning,
+  selectedRegionFilter,
+  onClearRegionFilter
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'plan' | 'map' | 'curves' | 'comparison'>('plan');
 
@@ -47,6 +51,29 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
+      {/* Regional Filter Banner */}
+      {selectedRegionFilter && (
+        <div className="p-3 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-xl flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-300 font-medium">
+            <span className="font-bold">Region Filter Active:</span>
+            <span className="px-2 py-0.5 bg-indigo-600 text-white rounded-md text-[11px] font-semibold">{selectedRegionFilter}</span>
+            {plan.results_by_region?.[selectedRegionFilter] && (
+              <span className="text-slate-500">
+                ({plan.results_by_region[selectedRegionFilter].num_assets} Assets &bull; {plan.results_by_region[selectedRegionFilter].pct_value_protected}% Value Protected)
+              </span>
+            )}
+          </div>
+          {onClearRegionFilter && (
+            <button
+              onClick={onClearRegionFilter}
+              className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold"
+            >
+              Show All Regions
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Top Warnings Banner if any */}
       {plan.warnings && plan.warnings.length > 0 && (
         <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 rounded-xl space-y-1 text-xs text-amber-800 dark:text-amber-200">

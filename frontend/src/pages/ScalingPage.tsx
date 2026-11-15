@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Scenario, FullPlanResponse, CoordinateMode } from '../types/defense';
 import { solveMultiRegion, generateSyntheticApi } from '../services/api';
 import { PlanSummaryCards } from '../components/PlanSummaryCards';
 import { DeploymentMapView } from '../components/DeploymentMapView';
-import { Sparkles, MapPin, Layers, Clock, Cpu, CheckCircle, RefreshCw, AlertCircle } from 'lucide-react';
+import { Sparkles, MapPin, Layers, Clock, Cpu, CheckCircle, RefreshCw, AlertCircle, Check } from 'lucide-react';
+import { getLoadedIndiaGeoJson } from '../utils/geo';
 
 interface ScalingPageProps {
   scenario: Scenario;
@@ -20,11 +21,29 @@ export const ScalingPage: React.FC<ScalingPageProps> = ({
   const [multiRegionPlan, setMultiRegionPlan] = useState<FullPlanResponse | null>(null);
   const [regionError, setRegionError] = useState<string | null>(null);
 
+  // Available States
+  const [availableStates, setAvailableStates] = useState<string[]>([]);
+  const [selectedStates, setSelectedStates] = useState<string[]>(['Punjab', 'Rajasthan']);
+  const [spreadAllStates, setSpreadAllStates] = useState<boolean>(false);
+
+  useEffect(() => {
+    getLoadedIndiaGeoJson()
+      .then((gj) => {
+        if (gj && gj.features) {
+          const names: string[] = gj.features
+            .map((f: any) => f.properties?.state_name)
+            .filter(Boolean)
+            .sort((a: string, b: string) => a.localeCompare(b));
+          setAvailableStates(names);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Synthetic Generator State
   const [numAssets, setNumAssets] = useState<number>(20);
   const [numSites, setNumSites] = useState<number>(25);
-  const [coordMode, setCoordMode] = useState<CoordinateMode>(scenario.coordinate_mode);
-  const [presetRegion, setPresetRegion] = useState<string>('punjab');
+  const [coordMode, setCoordMode] = useState<CoordinateMode>(scenario.coordinate_mode || 'geo');
   const [valueMin, setValueMin] = useState<number>(20);
   const [valueMax, setValueMax] = useState<number>(120);
   const [threatMin, setThreatMin] = useState<number>(0.1);
@@ -59,7 +78,8 @@ export const ScalingPage: React.FC<ScalingPageProps> = ({
         num_assets: Number(numAssets),
         num_sites: Number(numSites),
         coordinate_mode: coordMode,
-        preset_region: coordMode === 'geo' ? presetRegion : undefined,
+        selected_states: coordMode === 'geo' && !spreadAllStates ? selectedStates : undefined,
+        spread_all_states: coordMode === 'geo' ? spreadAllStates : false,
         value_min: Number(valueMin),
         value_max: Number(valueMax),
         threat_min: Number(threatMin),
@@ -188,57 +208,97 @@ export const ScalingPage: React.FC<ScalingPageProps> = ({
             Instantly generates random or regional benchmark instances for performance stress-testing. Never uses real military positions.
           </p>
 
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <div>
-              <label className="block text-slate-500 font-medium mb-1">Coordinate System</label>
-              <select
-                value={coordMode}
-                onChange={(e) => setCoordMode(e.target.value as CoordinateMode)}
-                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800"
-              >
-                <option value="grid">Grid (km plane)</option>
-                <option value="geo">Geographic (Indian BBox)</option>
-              </select>
+          <div className="space-y-3 text-xs">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-500 font-medium mb-1">Coordinate System</label>
+                <select
+                  value={coordMode}
+                  onChange={(e) => setCoordMode(e.target.value as CoordinateMode)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800"
+                >
+                  <option value="geo">Geographic (Real India States)</option>
+                  <option value="grid">Grid (km plane)</option>
+                </select>
+              </div>
+
+              {coordMode === 'geo' && (
+                <div className="flex flex-col justify-end">
+                  <label className="flex items-center gap-2 cursor-pointer pb-2 font-medium text-slate-700 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={spreadAllStates}
+                      onChange={(e) => setSpreadAllStates(e.target.checked)}
+                      className="rounded text-indigo-600 w-4 h-4"
+                    />
+                    <span>Spread across all 36 States/UTs</span>
+                  </label>
+                </div>
+              )}
             </div>
 
-            {coordMode === 'geo' && (
+            {coordMode === 'geo' && !spreadAllStates && (
               <div>
-                <label className="block text-slate-500 font-medium mb-1">Indian State Sector</label>
-                <select
-                  value={presetRegion}
-                  onChange={(e) => setPresetRegion(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800 font-medium"
-                >
-                  <option value="punjab">Punjab Border Sector</option>
-                  <option value="rajasthan">Rajasthan Desert Sector</option>
-                  <option value="ladakh">Ladakh Mountain Sector</option>
-                  <option value="gujarat">Gujarat Coastal Sector</option>
-                </select>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-slate-500 font-medium">Select Target Indian States:</label>
+                  <span className="text-[11px] text-indigo-600 font-mono">
+                    {selectedStates.length} selected
+                  </span>
+                </div>
+                <div className="max-h-28 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg p-2 bg-slate-50/50 dark:bg-slate-800/50 flex flex-wrap gap-1.5">
+                  {availableStates.map((st) => {
+                    const isSelected = selectedStates.includes(st);
+                    return (
+                      <button
+                        key={st}
+                        type="button"
+                        onClick={() => {
+                          if (isSelected) {
+                            if (selectedStates.length > 1) {
+                              setSelectedStates(selectedStates.filter((s) => s !== st));
+                            }
+                          } else {
+                            setSelectedStates([...selectedStates, st]);
+                          }
+                        }}
+                        className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 hover:border-indigo-400'
+                        }`}
+                      >
+                        {st}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
-            <div>
-              <label className="block text-slate-500 font-medium mb-1">Number of Assets</label>
-              <input
-                type="number"
-                min="5"
-                max="100"
-                value={numAssets}
-                onChange={(e) => setNumAssets(parseInt(e.target.value, 10) || 10)}
-                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800 font-mono"
-              />
-            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-500 font-medium mb-1">Number of Assets</label>
+                <input
+                  type="number"
+                  min="2"
+                  max="200"
+                  value={numAssets}
+                  onChange={(e) => setNumAssets(parseInt(e.target.value, 10) || 10)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800 font-mono"
+                />
+              </div>
 
-            <div>
-              <label className="block text-slate-500 font-medium mb-1">Number of Candidate Sites</label>
-              <input
-                type="number"
-                min="5"
-                max="100"
-                value={numSites}
-                onChange={(e) => setNumSites(parseInt(e.target.value, 10) || 12)}
-                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800 font-mono"
-              />
+              <div>
+                <label className="block text-slate-500 font-medium mb-1">Number of Candidate Sites</label>
+                <input
+                  type="number"
+                  min="2"
+                  max="200"
+                  value={numSites}
+                  onChange={(e) => setNumSites(parseInt(e.target.value, 10) || 12)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 dark:bg-slate-800 font-mono"
+                />
+              </div>
             </div>
 
             <div>

@@ -20,6 +20,7 @@ class Asset(BaseModel):
     priority_class: Optional[PriorityClass] = Field(None, description="Priority classification: high or low")
     threat_rate: float = Field(..., ge=0, description="Expected drone threat rate lambda_i (threats/min)")
     region: Optional[str] = Field(None, description="Optional region name for regional decomposition")
+    is_region_overridden: Optional[bool] = Field(False, description="Manual region override flag")
 
 class CandidateSite(BaseModel):
     id: str = Field(..., description="Unique site identifier (e.g. S1)")
@@ -34,6 +35,15 @@ class CandidateSite(BaseModel):
     channel_cost: float = Field(0.0, ge=0, description="Optional marginal cost per installed channel")
     depot_distance_km: Optional[float] = Field(None, ge=0, description="Distance to replenishment depot in km")
     region: Optional[str] = Field(None, description="Optional region name")
+    is_region_overridden: Optional[bool] = Field(False, description="Manual region override flag")
+
+class Depot(BaseModel):
+    id: str = Field(..., description="Unique depot identifier (e.g. D1)")
+    name: str = Field(..., description="Descriptive depot name")
+    x: Optional[float] = Field(None, description="Grid X coordinate in km")
+    y: Optional[float] = Field(None, description="Grid Y coordinate in km")
+    lat: Optional[float] = Field(None, description="Latitude in decimal degrees")
+    lon: Optional[float] = Field(None, description="Longitude in decimal degrees")
 
 class GlobalParameters(BaseModel):
     budget: float = Field(80.0, ge=0, description="Defense deployment budget (B)")
@@ -68,9 +78,10 @@ class Scenario(BaseModel):
     id: Optional[str] = Field(None, description="Scenario unique ID")
     name: str = Field(..., min_length=1, description="Scenario name")
     notes: Optional[str] = Field("", description="User notes/description")
-    coordinate_mode: CoordinateMode = Field("grid", description="Coordinate reference system (grid or geo)")
+    coordinate_mode: CoordinateMode = Field("geo", description="Coordinate reference system (grid or geo)")
     assets: List[Asset] = Field(default_factory=list)
     sites: List[CandidateSite] = Field(default_factory=list)
+    depots: List[Depot] = Field(default_factory=list, description="Resupply replenishment depots")
     parameters: GlobalParameters = Field(default_factory=GlobalParameters)
     coverage_overrides: Dict[str, int] = Field(default_factory=dict, description="Manual a_ij overrides: 'assetId_siteId': 0 or 1")
 
@@ -209,6 +220,22 @@ class WorkingStep(BaseModel):
     title: str
     details: List[str]
 
+class RegionResult(BaseModel):
+    region_name: str
+    num_assets: int = 0
+    total_asset_value: float = 0.0
+    value_protected: float = 0.0
+    pct_value_protected: float = 0.0
+    opened_sites: List[str] = Field(default_factory=list)
+    num_opened_sites: int = 0
+    total_site_cost: float = 0.0
+    total_channels: int = 0
+    allocated_stock_Q: int = 0
+    reserve_y1: int = 0
+    worst_leak_probability: float = 0.0
+    covered_asset_ids: List[str] = Field(default_factory=list)
+    uncovered_asset_ids: List[str] = Field(default_factory=list)
+
 class FullPlanResponse(BaseModel):
     scenario_id: Optional[str] = None
     scenario_name: str
@@ -217,6 +244,7 @@ class FullPlanResponse(BaseModel):
     channels: Step3QueueingOutput
     inventory: Step4InventoryOutput
     reserve: Step5ReserveOutput
+    results_by_region: Dict[str, RegionResult] = Field(default_factory=dict)
     comparison: List[ComparisonResult]
     working: List[WorkingStep]
     warnings: List[str]
@@ -262,9 +290,11 @@ class SensitivityResponse(BaseModel):
 class SyntheticGenerateRequest(BaseModel):
     num_assets: int = Field(10, ge=2, le=200)
     num_sites: int = Field(12, ge=2, le=200)
-    coordinate_mode: CoordinateMode = "grid"
+    coordinate_mode: CoordinateMode = "geo"
     bbox: Optional[Dict[str, float]] = None  # {min_x, max_x, min_y, max_y} or {min_lat, max_lat, min_lon, max_lon}
     preset_region: Optional[str] = None  # e.g., "punjab", "rajasthan", "ladakh", "custom"
+    selected_states: Optional[List[str]] = None
+    spread_all_states: bool = False
     value_min: float = 20.0
     value_max: float = 120.0
     threat_min: float = 0.1

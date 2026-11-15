@@ -1,8 +1,64 @@
+import json
 import math
-from typing import Dict, List, Tuple
-from app.models import Asset, CandidateSite, Scenario
+import os
+from typing import Any, Dict, List, Optional, Tuple
+from shapely.geometry import Point, shape
+from shapely.prepared import prep
+
+from app.models import Asset, CandidateSite, Scenario, Depot
 
 EARTH_RADIUS_KM = 6371.0
+
+_CACHED_INDIA_GEOJSON: Optional[Dict[str, Any]] = None
+_CACHED_STATE_GEOMS: Optional[List[Tuple[str, Any, Any, Tuple[float, float, float, float]]]] = None
+
+def get_india_geojson() -> Dict[str, Any]:
+    global _CACHED_INDIA_GEOJSON
+    if _CACHED_INDIA_GEOJSON is None:
+        geojson_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "india_states.geojson")
+        with open(geojson_path, "r", encoding="utf-8") as f:
+            _CACHED_INDIA_GEOJSON = json.load(f)
+    return _CACHED_INDIA_GEOJSON
+
+def get_state_geometries():
+    """
+    Returns cached list of (state_name, shapely_geom, prepared_geom, (minx, miny, maxx, maxy))
+    """
+    global _CACHED_STATE_GEOMS
+    if _CACHED_STATE_GEOMS is None:
+        gj = get_india_geojson()
+        geoms = []
+        for feat in gj.get("features", []):
+            st_name = feat.get("properties", {}).get("state_name", "Unknown")
+            geom = shape(feat["geometry"])
+            prepared = prep(geom)
+            bounds = geom.bounds  # (minx, miny, maxx, maxy) -> (min_lon, min_lat, max_lon, max_lat)
+            geoms.append((st_name, geom, prepared, bounds))
+        _CACHED_STATE_GEOMS = geoms
+    return _CACHED_STATE_GEOMS
+
+def find_state_for_point(lat: Optional[float], lon: Optional[float]) -> str:
+    """
+    Identifies the Indian State/UT for given (lat, lon) coordinates using
+    Survey of India compliant boundary polygons. Returns 'Outside India' if outside.
+    """
+    if lat is None or lon is None:
+        return "Outside India"
+    
+    # Rapid bounding box check for whole India first
+    if not (6.0 <= lat <= 38.0 and 68.0 <= lon <= 98.0):
+        return "Outside India"
+
+    pt = Point(lon, lat)
+    state_geoms = get_state_geometries()
+    for st_name, geom, prepared, bounds in state_geoms:
+        min_lon, min_lat, max_lon, max_lat = bounds
+        if not (min_lon <= lon <= max_lon and min_lat <= lat <= max_lat):
+            continue
+        if prepared.contains(pt) or geom.covers(pt):
+            return st_name
+
+    return "Outside India"
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
@@ -100,24 +156,44 @@ def compute_depot_distance(
 ) -> float:
     """
     Computes distance to logistics replenishment depot.
-    If site.depot_distance_km is explicitly set, uses it.
+    If scenario.depots has depots, finds the distance to the nearest depot.
+    Otherwise, if site.depot_distance_km is explicitly set, uses it.
     Otherwise derives from depot coordinates in scenario.parameters.
     For grid mode: Euclidean distance * 10 km/grid-unit.
     For geo mode: Haversine distance in km.
     """
-    if site.depot_distance_km is not None and site.depot_distance_km > 0:
-        return float(site.depot_distance_km)
-
-    params = scenario.parameters
     coord_mode = scenario.coordinate_mode
     site_coords = get_site_coords(site, coord_mode)
 
+    # 1. If scenario has multiple depots, compute min distance to nearest depot
+    if scenario.depots:
+        min_dist = float("inf")
+        for depot in scenario.depots:
+            if coord_mode == "geo":
+                d_lat = depot.lat if depot.lat is not None else 0.0
+                d_lon = depot.lon if depot.lon is not None else 0.0
+                dist = haversine_distance(site_coords[0], site_coords[1], d_lat, d_lon)
+            else:
+                d_x = depot.x if depot.x is not None else 0.0
+                d_y = depot.y if depot.y is not None else 0.0
+                dist = euclidean_distance(site_coords[0], site_coords[1], d_x, d_y) * 10.0
+            if dist < min_dist:
+                min_dist = dist
+        if min_dist != float("inf"):
+            return round(min_dist, 2)
+
+    # 2. Check site-level override
+    if site.depot_distance_km is not None and site.depot_distance_km > 0:
+        return float(site.depot_distance_km)
+
+    # 3. Fallback to scenario parameters depot
+    params = scenario.parameters
     if coord_mode == "geo":
         depot_lat = params.depot_lat if params.depot_lat is not None else 0.0
         depot_lon = params.depot_lon if params.depot_lon is not None else 0.0
-        return haversine_distance(site_coords[0], site_coords[1], depot_lat, depot_lon)
+        return round(haversine_distance(site_coords[0], site_coords[1], depot_lat, depot_lon), 2)
     else:
         depot_x = params.depot_x if params.depot_x is not None else 0.0
         depot_y = params.depot_y if params.depot_y is not None else 0.0
         grid_dist = euclidean_distance(site_coords[0], site_coords[1], depot_x, depot_y)
-        return grid_dist * 10.0  # specified 10 km per grid km rule
+        return round(grid_dist * 10.0, 2)  # specified 10 km per grid km rule

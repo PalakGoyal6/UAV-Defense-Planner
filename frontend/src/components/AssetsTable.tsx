@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Asset, CoordinateMode, PriorityClass } from '../types/defense';
 import Papa from 'papaparse';
-import { Plus, Trash2, Upload, Download, Clipboard, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Upload, Download, Clipboard, AlertCircle, AlertTriangle } from 'lucide-react';
+import { getStateForPoint } from '../utils/geo';
 
 interface AssetsTableProps {
   assets: Asset[];
@@ -27,23 +28,42 @@ export const AssetsTable: React.FC<AssetsTableProps> = ({
 
   const handleUpdate = (index: number, field: keyof Asset, value: any) => {
     const updated = [...assets];
-    updated[index] = { ...updated[index], [field]: value };
+    const item = { ...updated[index], [field]: value };
+
+    // Auto-assign region on coordinate change in geo mode if not overridden
+    if (coordinateMode === 'geo' && (field === 'lat' || field === 'lon')) {
+      if (!item.is_region_overridden) {
+        item.region = getStateForPoint(item.lat, item.lon);
+      }
+    }
+
+    // Flag manual override when region field is edited directly
+    if (field === 'region') {
+      item.is_region_overridden = true;
+    }
+
+    updated[index] = item;
     onChange(updated);
   };
 
   const handleAddRow = () => {
     const nextIdx = assets.length + 1;
+    const defaultLat = coordinateMode === 'geo' ? 28.6139 : null;
+    const defaultLon = coordinateMode === 'geo' ? 77.2090 : null;
+    const defaultRegion = coordinateMode === 'geo' ? getStateForPoint(defaultLat, defaultLon) : '';
+
     const newAsset: Asset = {
       id: `A${nextIdx}`,
       name: `Asset ${nextIdx}`,
       x: coordinateMode === 'grid' ? 5.0 : null,
       y: coordinateMode === 'grid' ? 5.0 : null,
-      lat: coordinateMode === 'geo' ? 28.5 : null,
-      lon: coordinateMode === 'geo' ? 77.2 : null,
+      lat: defaultLat,
+      lon: defaultLon,
       value: 50.0,
       priority_class: null,
       threat_rate: 0.25,
-      region: ''
+      region: defaultRegion,
+      is_region_overridden: false
     };
     onChange([...assets, newAsset]);
   };
@@ -63,17 +83,23 @@ export const AssetsTable: React.FC<AssetsTableProps> = ({
       dynamicTyping: true,
       complete: (results) => {
         const parsedAssets: Asset[] = results.data.map((row: any, idx: number) => {
+          const lat = row.lat !== undefined && row.lat !== null ? Number(row.lat) : null;
+          const lon = row.lon !== undefined && row.lon !== null ? Number(row.lon) : null;
+          const userRegion = row.region ? String(row.region).trim() : null;
+          const autoRegion = (coordinateMode === 'geo' && lat != null && lon != null) ? getStateForPoint(lat, lon) : null;
+
           return {
             id: String(row.id || `A${idx + 1}`).trim(),
             name: String(row.name || `Asset ${idx + 1}`).trim(),
             x: row.x !== undefined && row.x !== null ? Number(row.x) : null,
             y: row.y !== undefined && row.y !== null ? Number(row.y) : null,
-            lat: row.lat !== undefined && row.lat !== null ? Number(row.lat) : null,
-            lon: row.lon !== undefined && row.lon !== null ? Number(row.lon) : null,
+            lat,
+            lon,
             value: Math.max(1, Number(row.value) || 50),
             priority_class: (row.priority_class === 'high' || row.priority_class === 'low') ? row.priority_class : null,
             threat_rate: Math.max(0, Number(row.threat_rate) || 0.1),
-            region: row.region ? String(row.region).trim() : null
+            region: userRegion || autoRegion,
+            is_region_overridden: !!userRegion
           };
         });
         if (parsedAssets.length > 0) {
@@ -332,13 +358,36 @@ export const AssetsTable: React.FC<AssetsTableProps> = ({
 
                     {/* Region */}
                     <td className="py-2 px-3">
-                      <input
-                        type="text"
-                        placeholder="Region"
-                        value={a.region || ''}
-                        onChange={(e) => handleUpdate(i, 'region', e.target.value || null)}
-                        className="w-full px-2 py-1 rounded border border-slate-200 dark:border-slate-700 dark:bg-slate-800 text-xs"
-                      />
+                      <div className="relative flex items-center">
+                        <input
+                          type="text"
+                          placeholder="Region"
+                          value={a.region || ''}
+                          onChange={(e) => handleUpdate(i, 'region', e.target.value || null)}
+                          className={`w-full px-2 py-1 rounded border text-xs ${
+                            a.region === 'Outside India'
+                              ? 'border-rose-400 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
+                              : 'border-slate-200 dark:border-slate-700 dark:bg-slate-800'
+                          } ${a.is_region_overridden ? 'italic font-medium text-indigo-700 dark:text-indigo-400' : ''}`}
+                          title={a.is_region_overridden ? 'Manual override' : undefined}
+                        />
+                        {a.region === 'Outside India' && (
+                          <span
+                            className="absolute right-1 text-rose-500"
+                            title="Point is outside India boundaries"
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                          </span>
+                        )}
+                        {a.is_region_overridden && a.region !== 'Outside India' && (
+                          <span
+                            className="absolute right-1 text-[9px] px-1 bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300 rounded font-mono"
+                            title="Region manually overridden"
+                          >
+                            override
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Action */}

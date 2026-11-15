@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Scenario, Asset, CandidateSite, GlobalParameters, CoordinateMode } from '../types/defense';
+import { Scenario, Asset, CandidateSite, GlobalParameters, CoordinateMode, Depot } from '../types/defense';
 import { DataHealthBox } from '../components/DataHealthBox';
 import { AssetsTable } from '../components/AssetsTable';
 import { SitesTable } from '../components/SitesTable';
@@ -7,6 +7,7 @@ import { MapEditor } from '../components/MapEditor';
 import { ParametersForm } from '../components/ParametersForm';
 import { CoverageMatrixView } from '../components/CoverageMatrixView';
 import { Target, Shield, Map as MapIcon, Sliders, Grid } from 'lucide-react';
+import { computeNearestDepotDistance } from '../utils/geo';
 
 interface DataInputPageProps {
   scenario: Scenario;
@@ -149,6 +150,8 @@ export const DataInputPage: React.FC<DataInputPageProps> = ({
             sites={scenario.sites}
             onChange={updateSites}
             coordinateMode={scenario.coordinate_mode}
+            depots={scenario.depots || []}
+            fallbackDepot={scenario.parameters}
           />
         )}
 
@@ -157,6 +160,7 @@ export const DataInputPage: React.FC<DataInputPageProps> = ({
             coordinateMode={scenario.coordinate_mode}
             assets={scenario.assets}
             sites={scenario.sites}
+            depots={scenario.depots || []}
             onUpdateAsset={(i, a) => {
               const updated = [...scenario.assets];
               updated[i] = a;
@@ -169,6 +173,46 @@ export const DataInputPage: React.FC<DataInputPageProps> = ({
             }}
             onAddAsset={(a) => updateAssets([...scenario.assets, a])}
             onAddSite={(s) => updateSites([...scenario.sites, s])}
+            onUpdateDepot={(i, d) => {
+              const updatedDepots = [...(scenario.depots || [])];
+              updatedDepots[i] = d;
+              const updatedSites = scenario.sites.map(s => ({
+                ...s,
+                depot_distance_km: computeNearestDepotDistance(
+                  { lat: s.lat, lon: s.lon, x: s.x, y: s.y },
+                  updatedDepots,
+                  scenario.coordinate_mode,
+                  scenario.parameters
+                )
+              }));
+              onUpdateScenario({ ...scenario, depots: updatedDepots, sites: updatedSites });
+            }}
+            onAddDepot={(d) => {
+              const updatedDepots = [...(scenario.depots || []), d];
+              const updatedSites = scenario.sites.map(s => ({
+                ...s,
+                depot_distance_km: computeNearestDepotDistance(
+                  { lat: s.lat, lon: s.lon, x: s.x, y: s.y },
+                  updatedDepots,
+                  scenario.coordinate_mode,
+                  scenario.parameters
+                )
+              }));
+              onUpdateScenario({ ...scenario, depots: updatedDepots, sites: updatedSites });
+            }}
+            onDeleteDepot={(i) => {
+              const updatedDepots = (scenario.depots || []).filter((_, idx) => idx !== i);
+              const updatedSites = scenario.sites.map(s => ({
+                ...s,
+                depot_distance_km: computeNearestDepotDistance(
+                  { lat: s.lat, lon: s.lon, x: s.x, y: s.y },
+                  updatedDepots,
+                  scenario.coordinate_mode,
+                  scenario.parameters
+                )
+              }));
+              onUpdateScenario({ ...scenario, depots: updatedDepots, sites: updatedSites });
+            }}
           />
         )}
 

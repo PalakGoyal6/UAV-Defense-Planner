@@ -13,6 +13,7 @@ export interface Asset {
   priority_class?: PriorityClass | null;
   threat_rate: number;
   region?: string | null;
+  is_region_overridden?: boolean;
 }
 
 export interface CandidateSite {
@@ -28,6 +29,16 @@ export interface CandidateSite {
   channel_cost: number;
   depot_distance_km?: number | null;
   region?: string | null;
+  is_region_overridden?: boolean;
+}
+
+export interface Depot {
+  id: string;
+  name: string;
+  x?: number | null;
+  y?: number | null;
+  lat?: number | null;
+  lon?: number | null;
 }
 
 export interface GlobalParameters {
@@ -67,6 +78,7 @@ export interface Scenario {
   coordinate_mode: CoordinateMode;
   assets: Asset[];
   sites: CandidateSite[];
+  depots?: Depot[];
   parameters: GlobalParameters;
   coverage_overrides: Record<string, number>;
 }
@@ -208,6 +220,23 @@ export interface WorkingStep {
   details: string[];
 }
 
+export interface RegionResult {
+  region_name: string;
+  num_assets: number;
+  total_asset_value: number;
+  value_protected: number;
+  pct_value_protected: number;
+  opened_sites: string[];
+  num_opened_sites: number;
+  total_site_cost: number;
+  total_channels: number;
+  allocated_stock_Q: number;
+  reserve_y1: number;
+  worst_leak_probability: number;
+  covered_asset_ids: string[];
+  uncovered_asset_ids: string[];
+}
+
 export interface FullPlanResponse {
   scenario_id?: string | null;
   scenario_name: string;
@@ -216,10 +245,30 @@ export interface FullPlanResponse {
   channels: Step3QueueingOutput;
   inventory: Step4InventoryOutput;
   reserve: Step5ReserveOutput;
+  results_by_region?: Record<string, RegionResult>;
   comparison: ComparisonResult[];
   working: WorkingStep[];
   warnings: string[];
   meta: Record<string, any>;
+}
+
+export interface SyntheticGenerateRequest {
+  num_assets: number;
+  num_sites: number;
+  coordinate_mode?: CoordinateMode;
+  selected_states?: string[];
+  spread_all_states?: boolean;
+  preset_region?: string;
+  bbox?: Record<string, number>;
+  value_min?: number;
+  value_max?: number;
+  threat_min?: number;
+  threat_max?: number;
+  cost_min?: number;
+  cost_max?: number;
+  range_min?: number;
+  range_max?: number;
+  budget?: number;
 }
 
 export interface SensitivityPoint {

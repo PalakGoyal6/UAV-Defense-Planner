@@ -1,18 +1,23 @@
 import React, { useState } from 'react';
-import { CandidateSite, CoordinateMode } from '../types/defense';
+import { CandidateSite, CoordinateMode, Depot } from '../types/defense';
 import Papa from 'papaparse';
-import { Plus, Trash2, Upload, Download, Clipboard, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Upload, Download, Clipboard, AlertCircle, AlertTriangle } from 'lucide-react';
+import { getStateForPoint, computeNearestDepotDistance } from '../utils/geo';
 
 interface SitesTableProps {
   sites: CandidateSite[];
   onChange: (sites: CandidateSite[]) => void;
   coordinateMode: CoordinateMode;
+  depots?: Depot[];
+  fallbackDepot?: { depot_lat?: number | null; depot_lon?: number | null; depot_x?: number | null; depot_y?: number | null };
 }
 
 export const SitesTable: React.FC<SitesTableProps> = ({
   sites,
   onChange,
-  coordinateMode
+  coordinateMode,
+  depots,
+  fallbackDepot
 }) => {
   const [pasteModalOpen, setPasteModalOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
@@ -24,25 +29,63 @@ export const SitesTable: React.FC<SitesTableProps> = ({
 
   const handleUpdate = (index: number, field: keyof CandidateSite, value: any) => {
     const updated = [...sites];
-    updated[index] = { ...updated[index], [field]: value };
+    const item = { ...updated[index], [field]: value };
+
+    // Auto-assign region and recompute depot distance on coordinate change
+    if (coordinateMode === 'geo' && (field === 'lat' || field === 'lon')) {
+      if (!item.is_region_overridden) {
+        item.region = getStateForPoint(item.lat, item.lon);
+      }
+      if (item.lat != null && item.lon != null) {
+        item.depot_distance_km = computeNearestDepotDistance(
+          { lat: item.lat, lon: item.lon },
+          depots,
+          'geo',
+          fallbackDepot
+        );
+      }
+    } else if (coordinateMode === 'grid' && (field === 'x' || field === 'y')) {
+      if (item.x != null && item.y != null) {
+        item.depot_distance_km = computeNearestDepotDistance(
+          { x: item.x, y: item.y },
+          depots,
+          'grid',
+          fallbackDepot
+        );
+      }
+    }
+
+    if (field === 'region') {
+      item.is_region_overridden = true;
+    }
+
+    updated[index] = item;
     onChange(updated);
   };
 
   const handleAddRow = () => {
     const nextIdx = sites.length + 1;
+    const defaultLat = coordinateMode === 'geo' ? 28.6139 : null;
+    const defaultLon = coordinateMode === 'geo' ? 77.2090 : null;
+    const defaultRegion = coordinateMode === 'geo' ? getStateForPoint(defaultLat, defaultLon) : '';
+    const initialDepotDist = coordinateMode === 'geo'
+      ? computeNearestDepotDistance({ lat: defaultLat, lon: defaultLon }, depots, 'geo', fallbackDepot)
+      : computeNearestDepotDistance({ x: 5.0, y: 5.0 }, depots, 'grid', fallbackDepot);
+
     const newSite: CandidateSite = {
       id: `S${nextIdx}`,
       name: `Site ${nextIdx}`,
       x: coordinateMode === 'grid' ? 5.0 : null,
       y: coordinateMode === 'grid' ? 5.0 : null,
-      lat: coordinateMode === 'geo' ? 28.5 : null,
-      lon: coordinateMode === 'geo' ? 77.2 : null,
+      lat: defaultLat,
+      lon: defaultLon,
       cost: 25.0,
-      range_km: 3.5,
+      range_km: 15.0,
       max_channels: 10,
       channel_cost: 0.0,
-      depot_distance_km: null,
-      region: ''
+      depot_distance_km: initialDepotDist,
+      region: defaultRegion,
+      is_region_overridden: false
     };
     onChange([...sites, newSite]);
   };
@@ -62,19 +105,32 @@ export const SitesTable: React.FC<SitesTableProps> = ({
       dynamicTyping: true,
       complete: (results) => {
         const parsedSites: CandidateSite[] = results.data.map((row: any, idx: number) => {
+          const lat = row.lat !== undefined && row.lat !== null ? Number(row.lat) : null;
+          const lon = row.lon !== undefined && row.lon !== null ? Number(row.lon) : null;
+          const userRegion = row.region ? String(row.region).trim() : null;
+          const autoRegion = (coordinateMode === 'geo' && lat != null && lon != null) ? getStateForPoint(lat, lon) : null;
+          const userDepotDist = row.depot_distance_km ? Number(row.depot_distance_km) : null;
+          const autoDepotDist = computeNearestDepotDistance(
+            { lat, lon, x: row.x, y: row.y },
+            depots,
+            coordinateMode,
+            fallbackDepot
+          );
+
           return {
             id: String(row.id || `S${idx + 1}`).trim(),
             name: String(row.name || `Site ${idx + 1}`).trim(),
             x: row.x !== undefined && row.x !== null ? Number(row.x) : null,
             y: row.y !== undefined && row.y !== null ? Number(row.y) : null,
-            lat: row.lat !== undefined && row.lat !== null ? Number(row.lat) : null,
-            lon: row.lon !== undefined && row.lon !== null ? Number(row.lon) : null,
+            lat,
+            lon,
             cost: Math.max(1, Number(row.cost) || 20),
             range_km: Math.max(0.5, Number(row.range_km) || 3.0),
             max_channels: Math.max(1, Number(row.max_channels) || 10),
             channel_cost: Math.max(0, Number(row.channel_cost) || 0),
-            depot_distance_km: row.depot_distance_km ? Number(row.depot_distance_km) : null,
-            region: row.region ? String(row.region).trim() : null
+            depot_distance_km: userDepotDist != null ? userDepotDist : autoDepotDist,
+            region: userRegion || autoRegion,
+            is_region_overridden: !!userRegion
           };
         });
         if (parsedSites.length > 0) {
@@ -355,13 +411,36 @@ export const SitesTable: React.FC<SitesTableProps> = ({
 
                     {/* Region */}
                     <td className="py-2 px-3">
-                      <input
-                        type="text"
-                        placeholder="Region"
-                        value={s.region || ''}
-                        onChange={(e) => handleUpdate(i, 'region', e.target.value || null)}
-                        className="w-full px-2 py-1 rounded border border-slate-200 dark:border-slate-700 dark:bg-slate-800 text-xs"
-                      />
+                      <div className="relative flex items-center">
+                        <input
+                          type="text"
+                          placeholder="Region"
+                          value={s.region || ''}
+                          onChange={(e) => handleUpdate(i, 'region', e.target.value || null)}
+                          className={`w-full px-2 py-1 rounded border text-xs ${
+                            s.region === 'Outside India'
+                              ? 'border-rose-400 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
+                              : 'border-slate-200 dark:border-slate-700 dark:bg-slate-800'
+                          } ${s.is_region_overridden ? 'italic font-medium text-indigo-700 dark:text-indigo-400' : ''}`}
+                          title={s.is_region_overridden ? 'Manual override' : undefined}
+                        />
+                        {s.region === 'Outside India' && (
+                          <span
+                            className="absolute right-1 text-rose-500"
+                            title="Point is outside India boundaries"
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                          </span>
+                        )}
+                        {s.is_region_overridden && s.region !== 'Outside India' && (
+                          <span
+                            className="absolute right-1 text-[9px] px-1 bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300 rounded font-mono"
+                            title="Region manually overridden"
+                          >
+                            override
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Action */}

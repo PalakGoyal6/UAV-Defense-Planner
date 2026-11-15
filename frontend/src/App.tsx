@@ -12,6 +12,7 @@ import {
 import { HomePage } from './pages/HomePage';
 import { DataInputPage } from './pages/DataInputPage';
 import { ResultsPage } from './pages/ResultsPage';
+import { IndiaOverviewPage } from './pages/IndiaOverviewPage';
 import { SensitivityPage } from './pages/SensitivityPage';
 import { ScalingPage } from './pages/ScalingPage';
 import { ExportReportPage } from './pages/ExportReportPage';
@@ -19,20 +20,23 @@ import { ExportReportPage } from './pages/ExportReportPage';
 import {
   Shield, Database, LayoutDashboard, Play, Save, Copy,
   Moon, Sun, BarChart2, Layers, Download, CheckCircle,
-  AlertTriangle, RefreshCw, Plus, Sparkles
+  AlertTriangle, RefreshCw, Plus, Sparkles, Map as MapIcon
 } from 'lucide-react';
 
 const DEFAULT_BLANK_SCENARIO: Scenario = {
   name: 'New Scenario',
   notes: 'Custom defense scenario',
-  coordinate_mode: 'grid',
+  coordinate_mode: 'geo',
   assets: [
-    { id: 'A1', name: 'Command Center', x: 5.0, y: 5.0, value: 100, threat_rate: 0.40, priority_class: 'high' },
-    { id: 'A2', name: 'Logistics Hub', x: 8.0, y: 4.0, value: 70, threat_rate: 0.25, priority_class: 'low' }
+    { id: 'A1', name: 'Command Center', lat: 28.6139, lon: 77.2090, value: 100, threat_rate: 0.40, priority_class: 'high', region: 'Delhi' },
+    { id: 'A2', name: 'Logistics Hub', lat: 28.5355, lon: 77.3910, value: 70, threat_rate: 0.25, priority_class: 'low', region: 'Uttar Pradesh' }
   ],
   sites: [
-    { id: 'S1', name: 'Site North', x: 5.0, y: 5.0, cost: 30, range_km: 3.0, max_channels: 8, channel_cost: 0 },
-    { id: 'S2', name: 'Site East', x: 7.5, y: 4.5, cost: 25, range_km: 3.0, max_channels: 8, channel_cost: 0 }
+    { id: 'S1', name: 'Site North', lat: 28.6500, lon: 77.2200, cost: 30, range_km: 25.0, max_channels: 8, channel_cost: 0, region: 'Delhi', depot_distance_km: 15.0 },
+    { id: 'S2', name: 'Site East', lat: 28.5800, lon: 77.3500, cost: 25, range_km: 25.0, max_channels: 8, channel_cost: 0, region: 'Uttar Pradesh', depot_distance_km: 20.0 }
+  ],
+  depots: [
+    { id: 'D1', name: 'Delhi Central Depot', lat: 28.6100, lon: 77.2300 }
   ],
   parameters: {
     budget: 60.0,
@@ -47,8 +51,8 @@ const DEFAULT_BLANK_SCENARIO: Scenario = {
     target_service_level: 0.95,
     base_lead_time_days: 2.0,
     transport_speed_km_per_day: 300.0,
-    depot_x: 0.0,
-    depot_y: 0.0,
+    depot_lat: 28.6100,
+    depot_lon: 77.2300,
     order_setup_cost: 20.0,
     holding_cost_per_unit_per_day: 0.01,
     high_value_threshold: 75.0,
@@ -59,7 +63,8 @@ const DEFAULT_BLANK_SCENARIO: Scenario = {
 };
 
 export function App() {
-  const [currentPage, setCurrentPage] = useState<'home' | 'input' | 'results' | 'sensitivity' | 'scaling' | 'export'>('home');
+  const [currentPage, setCurrentPage] = useState<'home' | 'input' | 'results' | 'india-overview' | 'sensitivity' | 'scaling' | 'export'>('home');
+  const [regionFilter, setRegionFilter] = useState<string | null>(null);
   const [darkMode, setDarkMode] = useState<boolean>(false);
 
   // Scenario States
@@ -79,7 +84,7 @@ export function App() {
   // Modal State for Synthetic Generator
   const [newScenarioModalOpen, setNewScenarioModalOpen] = useState<boolean>(false);
   const [newScName, setNewScName] = useState<string>('My UAV Scenario');
-  const [newScCoord, setNewScCoord] = useState<CoordinateMode>('grid');
+  const [newScCoord, setNewScCoord] = useState<CoordinateMode>('geo');
 
   // Toggle Dark Mode
   useEffect(() => {
@@ -310,6 +315,18 @@ export function App() {
             </button>
 
             <button
+              onClick={() => setCurrentPage('india-overview')}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition ${
+                currentPage === 'india-overview'
+                  ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300'
+                  : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'
+              }`}
+            >
+              <MapIcon className="w-4 h-4 text-emerald-500" />
+              <span>India Overview</span>
+            </button>
+
+            <button
               onClick={() => setCurrentPage('sensitivity')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition ${
                 currentPage === 'sensitivity'
@@ -470,6 +487,19 @@ export function App() {
               plan={currentPlan}
               onRunPlan={handleRunPlan}
               isRunning={isRunningPlan}
+              selectedRegionFilter={regionFilter}
+              onClearRegionFilter={() => setRegionFilter(null)}
+            />
+          )}
+
+          {currentPage === 'india-overview' && (
+            <IndiaOverviewPage
+              scenario={currentScenario}
+              plan={currentPlan}
+              onOpenInResults={(reg) => {
+                setRegionFilter(reg || null);
+                setCurrentPage('results');
+              }}
             />
           )}
 
