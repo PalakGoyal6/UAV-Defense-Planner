@@ -3,7 +3,7 @@ from typing import Dict, List, Any, Optional
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
@@ -38,9 +38,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+router = APIRouter()
+
 # ----------------- Solver Endpoints -----------------
 
-@app.post("/api/solve", response_model=FullPlanResponse)
+@router.post("/solve", response_model=FullPlanResponse)
 def solve_plan(scenario: Scenario):
     """
     Executes the 5-step defense planning pipeline:
@@ -58,7 +60,7 @@ def solve_plan(scenario: Scenario):
             detail=f"Solver execution error: {str(exc)}"
         )
 
-@app.post("/api/solve/multi-region", response_model=FullPlanResponse)
+@router.post("/solve/multi-region", response_model=FullPlanResponse)
 def solve_multi_region(
     scenario: Scenario,
     custom_budgets: Optional[Dict[str, float]] = None
@@ -74,7 +76,7 @@ def solve_multi_region(
             detail=f"Multi-region solver error: {str(exc)}"
         )
 
-@app.post("/api/sensitivity", response_model=SensitivityResponse)
+@router.post("/sensitivity", response_model=SensitivityResponse)
 def compute_sensitivity(req: SensitivityRequest):
     """
     Executes parameter sweeps and knee detection for budget.
@@ -87,7 +89,7 @@ def compute_sensitivity(req: SensitivityRequest):
             detail=f"Sensitivity analysis error: {str(exc)}"
         )
 
-@app.post("/api/coverage")
+@router.post("/coverage")
 def get_coverage_matrix_api(scenario: Scenario):
     """
     Returns the auto-computed coverage matrix (a_ij) and distance matrix (km)
@@ -106,7 +108,7 @@ def get_coverage_matrix_api(scenario: Scenario):
             detail=f"Coverage calculation error: {str(exc)}"
         )
 
-@app.post("/api/generate", response_model=Scenario)
+@router.post("/generate", response_model=Scenario)
 def generate_synthetic(req: SyntheticGenerateRequest):
     """
     Generates a synthetic scenario for scaling or benchmark demonstrations.
@@ -122,7 +124,7 @@ def generate_synthetic(req: SyntheticGenerateRequest):
 
 # ----------------- Scenario CRUD Endpoints -----------------
 
-@app.get("/api/scenarios", response_model=List[Dict[str, Any]])
+@router.get("/scenarios", response_model=List[Dict[str, Any]])
 def list_scenarios(session: Session = Depends(get_session)):
     """
     Lists all saved scenarios with summary metadata.
@@ -147,7 +149,7 @@ def list_scenarios(session: Session = Depends(get_session)):
         })
     return out
 
-@app.post("/api/scenarios", response_model=Dict[str, Any])
+@router.post("/scenarios", response_model=Dict[str, Any])
 def create_scenario(scenario: Scenario, session: Session = Depends(get_session)):
     """
     Creates and persists a new scenario in SQLite.
@@ -168,7 +170,7 @@ def create_scenario(scenario: Scenario, session: Session = Depends(get_session))
     session.refresh(rec)
     return {"id": rec.id, "name": rec.name, "message": "Scenario created successfully"}
 
-@app.get("/api/scenarios/{scenario_id}", response_model=Scenario)
+@router.get("/scenarios/{scenario_id}", response_model=Scenario)
 def get_scenario(scenario_id: str, session: Session = Depends(get_session)):
     """
     Retrieves full scenario details by ID.
@@ -183,7 +185,7 @@ def get_scenario(scenario_id: str, session: Session = Depends(get_session)):
     data["coordinate_mode"] = rec.coordinate_mode
     return Scenario(**data)
 
-@app.put("/api/scenarios/{scenario_id}", response_model=Dict[str, Any])
+@router.put("/scenarios/{scenario_id}", response_model=Dict[str, Any])
 def update_scenario(scenario_id: str, scenario: Scenario, session: Session = Depends(get_session)):
     """
     Updates an existing scenario.
@@ -201,7 +203,7 @@ def update_scenario(scenario_id: str, scenario: Scenario, session: Session = Dep
     session.commit()
     return {"id": rec.id, "name": rec.name, "message": "Scenario updated successfully"}
 
-@app.delete("/api/scenarios/{scenario_id}")
+@router.delete("/scenarios/{scenario_id}")
 def delete_scenario(scenario_id: str, session: Session = Depends(get_session)):
     """
     Deletes a scenario by ID.
@@ -213,7 +215,7 @@ def delete_scenario(scenario_id: str, session: Session = Depends(get_session)):
     session.commit()
     return {"message": f"Scenario {scenario_id} deleted successfully"}
 
-@app.post("/api/scenarios/{scenario_id}/duplicate", response_model=Scenario)
+@router.post("/scenarios/{scenario_id}/duplicate", response_model=Scenario)
 def duplicate_scenario(scenario_id: str, session: Session = Depends(get_session)):
     """
     Duplicates an existing scenario.
@@ -239,7 +241,7 @@ def duplicate_scenario(scenario_id: str, session: Session = Depends(get_session)
     session.refresh(new_rec)
     return Scenario(**new_data)
 
-@app.get("/api/scenarios/{scenario_id}/export")
+@router.get("/scenarios/{scenario_id}/export")
 def export_scenario(scenario_id: str, session: Session = Depends(get_session)):
     """
     Exports full scenario as JSON.
@@ -249,7 +251,7 @@ def export_scenario(scenario_id: str, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Scenario not found")
     return rec.data
 
-@app.post("/api/import", response_model=Scenario)
+@router.post("/import", response_model=Scenario)
 def import_scenario(data: Dict[str, Any], session: Session = Depends(get_session)):
     """
     Validates and imports a scenario from uploaded JSON data.
@@ -264,8 +266,8 @@ def import_scenario(data: Dict[str, Any], session: Session = Depends(get_session
             notes=scenario.notes or "Imported scenario",
             coordinate_mode=scenario.coordinate_mode,
             data=scenario.model_dump(),
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         session.add(rec)
         session.commit()
@@ -273,8 +275,14 @@ def import_scenario(data: Dict[str, Any], session: Session = Depends(get_session
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Invalid scenario payload: {str(exc)}")
 
-@app.get("/health")
-@app.get("/api/health")
-@app.get("/")
+@router.get("/health")
 def health():
+    return {"status": "ok", "app": "UAV Defense Resource Planner API"}
+
+# Mount the router both with and without /api prefix for maximum routing compatibility
+app.include_router(router, prefix="/api")
+app.include_router(router)
+
+@app.get("/")
+def root():
     return {"status": "ok", "app": "UAV Defense Resource Planner API"}
