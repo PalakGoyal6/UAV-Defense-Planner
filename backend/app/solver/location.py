@@ -7,15 +7,23 @@ from app.models import (
 )
 from app.solver.geometry import compute_coverage_matrix
 
-def make_binary_variable(name: str) -> pulp.LpVariable:
-    """Safely construct a binary LpVariable across PuLP versions and environments."""
+def make_binary_variable(name: str, prob: Optional[pulp.LpProblem] = None) -> pulp.LpVariable:
+    """Safely construct a binary LpVariable across all PuLP versions (PuLP 2.x, 3.x, and 4.x)."""
+    if prob is not None and hasattr(prob, "add_variable"):
+        try:
+            return prob.add_variable(name, lowBound=0, upBound=1, cat=getattr(pulp, "LpBinary", "Binary"))
+        except Exception:
+            pass
     try:
         return pulp.LpVariable(name, 0, 1, pulp.LpBinary)
-    except TypeError:
+    except Exception:
         try:
             return pulp.LpVariable(name, lowBound=0, upBound=1, cat=pulp.LpBinary)
-        except TypeError:
-            return pulp.LpVariable(name, lowBound=0, upBound=1)
+        except Exception:
+            try:
+                return pulp.LpVariable(name, 0, 1)
+            except Exception:
+                return pulp.LpVariable(name)
 
 def assign_priority_classes(scenario: Scenario) -> Dict[str, str]:
     """
@@ -125,7 +133,7 @@ def run_cost_minimizing_set_cover(
     ]
 
     prob = pulp.LpProblem("CostMinSetCover", pulp.LpMinimize)
-    y = {s.id: make_binary_variable(f"y_sc_{s.id}") for s in pruned_sites}
+    y = {s.id: make_binary_variable(f"y_sc_{s.id}", prob) for s in pruned_sites}
 
     # Objective: minimize site costs
     prob += pulp.lpSum(site_dict[s_id].cost * y[s_id] for s_id in site_dict)
@@ -271,14 +279,14 @@ def solve_location_step(
 
     # Decision variables
     # y_j = 1 if unit opened at site j
-    y = {s.id: make_binary_variable(f"y_{s.id}") for s in pruned_sites}
+    y = {s.id: make_binary_variable(f"y_{s.id}", prob) for s in pruned_sites}
 
     # x_ij = 1 if asset i is protected by site j (sparse: only where a_ij == 1)
     x: Dict[Tuple[str, str], pulp.LpVariable] = {}
     for a in scenario.assets:
         for s in pruned_sites:
             if coverage[a.id].get(s.id, 0) == 1:
-                x[(a.id, s.id)] = make_binary_variable(f"x_{a.id}_{s.id}")
+                x[(a.id, s.id)] = make_binary_variable(f"x_{a.id}_{s.id}", prob)
 
     # Objective: maximize sum_i sum_j w_i * x_ij
     prob += pulp.lpSum(asset_dict[i].value * var for (i, j), var in x.items())
