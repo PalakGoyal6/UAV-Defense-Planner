@@ -7,6 +7,16 @@ from app.models import (
 )
 from app.solver.geometry import compute_coverage_matrix
 
+def make_binary_variable(name: str) -> pulp.LpVariable:
+    """Safely construct a binary LpVariable across PuLP versions and environments."""
+    try:
+        return pulp.LpVariable(name, 0, 1, pulp.LpBinary)
+    except TypeError:
+        try:
+            return pulp.LpVariable(name, lowBound=0, upBound=1, cat=pulp.LpBinary)
+        except TypeError:
+            return pulp.LpVariable(name, lowBound=0, upBound=1)
+
 def assign_priority_classes(scenario: Scenario) -> Dict[str, str]:
     """
     Ensures every asset has a high/low priority class based on its value
@@ -115,7 +125,7 @@ def run_cost_minimizing_set_cover(
     ]
 
     prob = pulp.LpProblem("CostMinSetCover", pulp.LpMinimize)
-    y = {s.id: pulp.LpVariable(f"y_sc_{s.id}", cat=pulp.LpBinary) for s in pruned_sites}
+    y = {s.id: make_binary_variable(f"y_sc_{s.id}") for s in pruned_sites}
 
     # Objective: minimize site costs
     prob += pulp.lpSum(site_dict[s_id].cost * y[s_id] for s_id in site_dict)
@@ -241,14 +251,14 @@ def solve_location_step(
 
     # Decision variables
     # y_j = 1 if unit opened at site j
-    y = {s.id: pulp.LpVariable(f"y_{s.id}", cat=pulp.LpBinary) for s in pruned_sites}
+    y = {s.id: make_binary_variable(f"y_{s.id}") for s in pruned_sites}
 
     # x_ij = 1 if asset i is protected by site j (sparse: only where a_ij == 1)
     x: Dict[Tuple[str, str], pulp.LpVariable] = {}
     for a in scenario.assets:
         for s in pruned_sites:
             if coverage[a.id].get(s.id, 0) == 1:
-                x[(a.id, s.id)] = pulp.LpVariable(f"x_{a.id}_{s.id}", cat=pulp.LpBinary)
+                x[(a.id, s.id)] = make_binary_variable(f"x_{a.id}_{s.id}")
 
     # Objective: maximize sum_i sum_j w_i * x_ij
     prob += pulp.lpSum(asset_dict[i].value * var for (i, j), var in x.items())
