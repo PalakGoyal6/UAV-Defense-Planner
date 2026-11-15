@@ -136,14 +136,34 @@ def run_cost_minimizing_set_cover(
         if covering_sites:
             prob += pulp.lpSum(y[s_id] for s_id in covering_sites) >= 1
 
-    prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=30))
-    status = pulp.LpStatus[prob.status]
-
-    opened = [s_id for s_id in site_dict if pulp.value(y[s_id]) is not None and pulp.value(y[s_id]) > 0.5]
-    total_cost = sum(site_dict[s_id].cost for s_id in opened)
-    val_protected = sum(asset_dict[a_id].value for a_id in coverable_assets)
-
-    return opened, total_cost, val_protected, status
+    try:
+        prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=30))
+        status = pulp.LpStatus[prob.status]
+        opened = [s_id for s_id in site_dict if pulp.value(y[s_id]) is not None and pulp.value(y[s_id]) > 0.5]
+        total_cost = sum(site_dict[s_id].cost for s_id in opened)
+        val_protected = sum(asset_dict[a_id].value for a_id in coverable_assets)
+        return opened, total_cost, val_protected, status
+    except Exception:
+        # Fallback greedy set cover if CBC solver is unavailable or fails
+        uncovered = set(coverable_assets)
+        opened = []
+        while uncovered:
+            best_s = None
+            best_cov = 0
+            for s in pruned_sites:
+                if s.id in opened:
+                    continue
+                cov = sum(1 for a_id in uncovered if coverage[a_id].get(s.id, 0) == 1)
+                if cov > best_cov:
+                    best_cov = cov
+                    best_s = s.id
+            if not best_s or best_cov == 0:
+                break
+            opened.append(best_s)
+            uncovered -= {a_id for a_id in uncovered if coverage[a_id].get(best_s, 0) == 1}
+        total_cost = sum(site_dict[s_id].cost for s_id in opened)
+        val_protected = sum(asset_dict[a_id].value for a_id in coverable_assets)
+        return opened, total_cost, val_protected, "GreedySetCover"
 
 def solve_location_step(
     scenario: Scenario,

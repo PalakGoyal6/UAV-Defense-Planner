@@ -1,0 +1,171 @@
+{
+  "name": "India National Defense — Geo Example",
+  "notes": "Preloaded illustrative multi-state scenario covering critical assets across Northern & Western India with Survey of India boundary integration and resupply depots.",
+  "coordinate_mode": "geo",
+  "assets": [
+    {
+      "id": "A1",
+      "name": "Northern Air Command Base (Punjab)",
+      "lat": 31.634,
+      "lon": 74.8723,
+      "region": "Punjab",
+      "value": 120.0,
+      "priority_class": "high",
+      "threat_rate": 0.45
+    },
+    {
+      "id": "A2",
+      "name": "Strategic Communications Center (Delhi)",
+      "lat": 28.6139,
+      "lon": 77.209,
+      "region": "Delhi",
+      "value": 150.0,
+      "priority_class": "high",
+      "threat_rate": 0.5
+    },
+    {
+      "id": "A3",
+      "name": "Desert Border Outpost (Rajasthan)",
+      "lat": 26.9157,
+      "lon": 70.9083,
+      "region": "Rajasthan",
+      "value": 95.0,
+      "priority_class": "high",
+      "threat_rate": 0.35
+    },
+    {
+      "id": "A4",
+      "name": "Western Coastal Radar (Gujarat)",
+      "lat": 23.242,
+      "lon": 69.6669,
+      "region": "Gujarat",
+      "value": 85.0,
+      "priority_class": "low",
+      "threat_rate": 0.25
+    },
+    {
+      "id": "A5",
+      "name": "Central Ammunition Depot (Haryana)",
+      "lat": 30.3782,
+      "lon": 76.7767,
+      "region": "Haryana",
+      "value": 110.0,
+      "priority_class": "high",
+      "threat_rate": 0.3
+    },
+    {
+      "id": "A6",
+      "name": "Naval Air Station (Maharashtra)",
+      "lat": 18.922,
+      "lon": 72.8347,
+      "region": "Maharashtra",
+      "value": 130.0,
+      "priority_class": "high",
+      "threat_rate": 0.4
+    }
+  ],
+  "sites": [
+    {
+      "id": "S1",
+      "name": "Punjab Defense Battery",
+      "lat": 31.326,
+      "lon": 75.5762,
+      "region": "Punjab",
+      "cost": 45.0,
+      "range_km": 160.0,
+      "max_channels": 8,
+      "channel_cost": 0.0
+    },
+    {
+      "id": "S2",
+      "name": "Delhi NCR SAM Battery",
+      "lat": 28.5355,
+      "lon": 77.391,
+      "region": "Delhi",
+      "cost": 50.0,
+      "range_km": 180.0,
+      "max_channels": 10,
+      "channel_cost": 0.0
+    },
+    {
+      "id": "S3",
+      "name": "Rajasthan Forward Site",
+      "lat": 26.2389,
+      "lon": 73.0243,
+      "region": "Rajasthan",
+      "cost": 40.0,
+      "range_km": 280.0,
+      "max_channels": 8,
+      "channel_cost": 0.0
+    },
+    {
+      "id": "S4",
+      "name": "Gujarat Border Defense Unit",
+      "lat": 23.1815,
+      "lon": 70.15,
+      "region": "Gujarat",
+      "cost": 35.0,
+      "range_km": 170.0,
+      "max_channels": 6,
+      "channel_cost": 0.0
+    },
+    {
+      "id": "S5",
+      "name": "Haryana Multi-Layer Battery",
+      "lat": 29.9695,
+      "lon": 76.8783,
+      "region": "Haryana",
+      "cost": 40.0,
+      "range_km": 190.0,
+      "max_channels": 8,
+      "channel_cost": 0.0
+    },
+    {
+      "id": "S6",
+      "name": "Mumbai Coastal Defense Unit",
+      "lat": 19.076,
+      "lon": 72.8777,
+      "region": "Maharashtra",
+      "cost": 45.0,
+      "range_km": 150.0,
+      "max_channels": 8,
+      "channel_cost": 0.0
+    }
+  ],
+  "depots": [
+    {
+      "id": "D1",
+      "name": "Central Depot Ambala",
+      "lat": 30.3782,
+      "lon": 76.7767
+    },
+    {
+      "id": "D2",
+      "name": "Western Depot Pune",
+      "lat": 18.5204,
+      "lon": 73.8567
+    }
+  ],
+  "parameters": {
+    "budget": 200.0,
+    "mean_engagement_time_min": 2.0,
+    "target_leak_probability": 0.05,
+    "attack_duration_min": 45.0,
+    "shots_per_engagement": 1,
+    "underage_cost": 60.0,
+    "overage_cost": 8.0,
+    "interceptor_unit_cost": 3.0,
+    "demand_mode": "derived",
+    "target_service_level": 0.95,
+    "base_lead_time_days": 1.5,
+    "transport_speed_km_per_day": 400.0,
+    "depot_x": 0.0,
+    "depot_y": 0.0,
+    "order_setup_cost": 25.0,
+    "holding_cost_per_unit_per_day": 0.02,
+    "high_value_threshold": 100.0,
+    "solver_time_limit_sec": 60,
+    "assignment_mode": "single"
+  },
+  "coverage_overrides": {}
+}

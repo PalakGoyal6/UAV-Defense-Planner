@@ -11,25 +11,30 @@ else:
 sqlite_url = f"sqlite:///{DATABASE_FILE}"
 engine = create_engine(sqlite_url, connect_args={"check_same_thread": False})
 
-def find_air_base_sample() -> str | None:
+def find_sample_file(filename: str) -> str | None:
     candidates = [
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "sample_data", "air_base.json"),
-        os.path.join(os.getcwd(), "sample_data", "air_base.json"),
-        "/var/task/sample_data/air_base.json",
-        os.path.join(os.path.dirname(__file__), "air_base.json")
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "sample_data", filename),
+        os.path.join(os.getcwd(), "sample_data", filename),
+        f"/var/task/sample_data/{filename}",
+        os.path.join(os.path.dirname(__file__), filename)
     ]
     for p in candidates:
         if os.path.exists(p):
             return p
     return None
 
+def find_air_base_sample() -> str | None:
+    return find_sample_file("air_base.json")
+
+def find_india_demo_sample() -> str | None:
+    return find_sample_file("india_geo_demo.json")
+
 def init_db():
     SQLModel.metadata.create_all(engine)
-    # Seed default air base scenario if database is empty
     with Session(engine) as session:
-        statement = select(ScenarioRecord)
-        results = session.exec(statement).all()
-        if not results:
+        # Check if air-base-small exists
+        air_base_rec = session.get(ScenarioRecord, "air-base-small")
+        if not air_base_rec:
             air_base_path = find_air_base_sample()
             data = None
             if air_base_path:
@@ -40,7 +45,6 @@ def init_db():
                     print(f"Warning: Failed to load air_base.json: {e}")
 
             if not data:
-                # Built-in minimal fallback if sample_data path is missing in serverless bundle
                 data = {
                     "name": "Air Base — small example",
                     "notes": "Preloaded illustrative example for an air base defense perimeter in grid coordinates (km).",
@@ -80,6 +84,29 @@ def init_db():
             )
             session.add(default_rec)
             session.commit()
+
+        # Check if india-defense-demo exists
+        india_rec = session.get(ScenarioRecord, "india-defense-demo")
+        if not india_rec:
+            india_path = find_india_demo_sample()
+            data_india = None
+            if india_path:
+                try:
+                    with open(india_path, "r", encoding="utf-8") as f:
+                        data_india = json.load(f)
+                except Exception as e:
+                    print(f"Warning: Failed to load india_geo_demo.json: {e}")
+
+            if data_india:
+                geo_rec = ScenarioRecord(
+                    id="india-defense-demo",
+                    name=data_india.get("name", "India National Defense — Geo Example"),
+                    notes=data_india.get("notes", "Default India Geo seed scenario"),
+                    coordinate_mode=data_india.get("coordinate_mode", "geo"),
+                    data=data_india
+                )
+                session.add(geo_rec)
+                session.commit()
 
 def get_session():
     init_db()
