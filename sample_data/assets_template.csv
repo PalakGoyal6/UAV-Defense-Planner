@@ -1,0 +1,6 @@
+id,name,x,y,lat,lon,value,priority_class,threat_rate,region
+A1,Command Centre,5.0,5.0,,,100,high,0.40,
+A2,Fuel Depot,8.0,3.0,,,90,high,0.35,
+A3,Aircraft Apron,3.0,8.0,,,80,high,0.30,
+A4,Power Supply,9.0,8.0,,,60,low,0.25,
+A5,Stores,1.0,2.0,,,30,low,0.15,

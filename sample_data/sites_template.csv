@@ -1,0 +1,7 @@
+id,name,x,y,lat,lon,cost,range_km,max_channels,channel_cost,depot_distance_km,region
+S1,Site 1,4.0,4.0,,,30,3.0,8,0,,
+S2,Site 2,7.0,4.0,,,25,3.0,8,0,,
+S3,Site 3,4.0,7.0,,,25,3.0,8,0,,
+S4,Site 4,8.5,7.0,,,20,2.5,8,0,,
+S5,Site 5,2.0,3.0,,,15,2.5,8,0,,
+S6,Site 6,6.0,6.0,,,40,4.5,10,0,,
